@@ -116,13 +116,16 @@ prevents container restarts on upgrade.
 
 ## Security & TLS (SEC-*)
 
-**SEC-010 | MUST | New sidecar or service**
+**SEC-010 | MUST | New sidecar or service that receives traffic from outside its pod**
 Include the new service in TLS SANs and IPs of certificates. Check existing workload_tls_self_signed.go for the SAN/IP
-builder pattern.
+builder pattern. Scope: this applies only to containers reachable across the pod boundary (pod-to-pod / Service
+traffic). A sidecar that is only reached by other containers in the same pod over loopback (localhost / 127.0.0.1) does
+not terminate cross-pod TLS and does not need a cert/SAN — see SEC-075.
 
-**SEC-020 | MUST | New sidecar or service**
+**SEC-020 | MUST | New sidecar or service that receives traffic from outside its pod**
 Pass TLS flags and volume mounts consistently. Match the pattern in `config-llm-template.yaml` for TLS args, cert paths,
-and volume mounts.
+and volume mounts. Same scope as SEC-010: only for containers that receive traffic from outside the pod. Intra-pod
+loopback listeners don't need TLS flags/mounts.
 
 **SEC-030 | MUST | Any networking code**
 Never use `InsecureSkipVerify`. Gate on certificate rotation support. Check if the target component supports automatic
@@ -162,6 +165,21 @@ Validate all interpolated values in CEL expressions against injection. Template 
 `{{.ModelRoutingHeader}}`) interpolated into CEL strings must be validated with a strict allowlist before rendering.
 Verify the allowlist blocks all CEL-significant characters: quotes, parentheses, backslashes, pipes, ampersands. Add
 unit tests covering edge cases for the validation function.
+
+**SEC-075 | MUST | New network connections, HTTP/gRPC clients, or dial targets**
+Encrypt traffic that leaves the pod. Any connection to another pod, a Service, or an external endpoint MUST use TLS
+(`https://`, gRPC-TLS) — a plaintext `http://` (or insecure dial) to a remote host is a finding. The decisive test is
+the destination, not the fact that the connection exists: **traffic that crosses the pod boundary requires TLS;
+container-to-container communication within the same pod over loopback (`localhost`, `127.0.0.1`, `::1`) never leaves the
+pod's network namespace and MAY be plaintext.** When you see a plaintext connection, resolve the destination host — a
+loopback address is acceptable and expected; anything else (a Service name, a peer pod IP/DNS, a routable host) must be
+TLS. Don't flag intra-pod loopback calls, and don't wave through remote plaintext just because it "works".
+**Exception — user-provided URLs (SHOULD, not MUST):** when the plaintext target is a value the user supplies (a config
+field, `storageUri`, CR-provided endpoint) rather than a hardcoded host, downgrade to a warning. Dev/test environments
+are legitimate `http://` targets, so accepting user-provided `http://` inputs is fine; the code SHOULD default to TLS,
+warn/document when plaintext is used, and never *force* plaintext. Only a hardcoded plaintext remote host is a MUST
+finding. This is the counterpart to SEC-010/020 (which cover the server side of the same boundary). (fixture
+sec-075-plaintext-http)
 
 ## Testing (TST-*)
 

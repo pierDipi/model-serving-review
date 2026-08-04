@@ -1,0 +1,174 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+#
+# .coderabbit.yaml — opendatahub-io/kserve
+#
+# Generated from the model-serving-review skill rubric
+# (1,219 review comments + 759 Jira bugs). Each rule ID below maps 1:1 to
+# skills/model-serving-review/knowledge/review-rules.md in the model-serving-review repo.
+#
+# Deployment: copy this file AND the .coderabbit/ directory to the root of
+# opendatahub-io/kserve, on the default branch. CodeRabbit reads it per-PR.
+# CodeRabbit also auto-loads AGENTS.md / CLAUDE.md as Code Guidelines if present.
+#
+# This is the ODH fork: SYNC-* overlay-discipline rules DO apply here.
+language: en-US
+reviews:
+  # Start conservative. Move to "assertive" after 2–4 weeks once the team trusts the signal.
+  profile: chill
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+
+  # Don't spend review budget on generated / vendored code.
+  path_filters:
+    - "!vendor/**"
+    - "!**/zz_generated*.go"
+    - "!**/*.pb.go"
+    - "!**/*_generated.go"
+    - "!**/mock_*.go"
+    - "!**/testdata/**"
+
+  path_instructions:
+    - path: "pkg/apis/**"
+      instructions: |
+        KServe API design (rubric API-*). Prioritize internal consistency with existing types in the same package, then k8s API conventions.
+        - API-010 (MUST): Prefer typed API fields over annotations for first-class features — annotations lock you into supporting them forever and skip schema validation/versioning.
+        - API-020 (MUST): Avoid strict/closed enum validation for values that may grow (methods, backends). Prefer open enums or documented string fields.
+        - API-030 (MUST): Additive changes only. Adding a status condition or spec field is non-breaking; removing/renaming a field or changing its type is breaking — flag it.
+        - API-040 (SHOULD): Avoid redundant nesting (e.g. speculativeDecoding.speculator). Flatten repetitive paths.
+        - API-050/060 (SHOULD): Validate the API shape against all deployment topologies (single-node, multi-node, prefill/decode). Start with top-level config that propagates; add per-component overrides only when a concrete asymmetric use case exists.
+
+    - path: "**/*_types.go"
+      instructions: |
+        API type definitions (rubric API-*). Same rules as pkg/apis/**:
+        - Flag field removals, renames, and type changes as breaking (API-030).
+        - Flag newly-introduced strict enum validation that could block future values (API-020).
+        - Prefer typed fields over annotation-driven behavior (API-010).
+
+    - path: "pkg/controller/**"
+      instructions: |
+        Controller/reconciler code (rubric CTL-*, CODE-*, MIG-050/060).
+        - CTL-100 (MUST, #1 Blocker source): Controller upgrades must NOT restart user workloads. Any change to reconciler output that alters a Deployment/StatefulSet/LWS pod-template spec (annotations, labels, command strings, env vars, volume mounts, security context) changes the pod-template hash and forces a rollout. For every change ask: "If only the controller binary is upgraded and the user CR is unchanged, will existing pods restart?" Common triggers: shell-quoting changes in modelcar/init commands, annotation/label injection into pod templates, security-context additions, config values that propagate into pod specs.
+        - CTL-010 (MUST): Exit-early. Reverse guard conditions to avoid deep if/else nesting.
+        - CTL-020 (MUST): Guard nil panics on nested spec access (e.g. Router.Scheduler.Pool.Spec.ExtensionRef.Name) — presets/baseRefs mean the full spec isn't populated until config_merge runs.
+        - CTL-030 (MUST): Never emit events on success or no-op — it causes API-server load and client-side rate limiting. Events are for errors/state transitions; use status conditions for continuous state.
+        - CTL-040 (MUST): Optional-feature sub-reconcilers must handle transitions (enabled→disabled) and CRUD must handle both IsNotFound AND meta.IsNoMatchError (CRD not installed).
+        - CODE-020 (SHOULD): Don't assume owner-references[0] is yours — loop and match by kind/name; guard array access with length checks.
+        - SEC-075 (MUST/SHOULD): Traffic that leaves the pod must use TLS — a hardcoded plaintext http:// (or insecure dial) to a Service, peer pod, or external host is a MUST finding. Do NOT flag container-to-container calls over loopback (localhost/127.0.0.1/::1) — that traffic never leaves the pod. When the plaintext target is a user-provided URL (config field, storageUri, CR endpoint), downgrade to a warning: dev/test http:// targets are legitimate, so accept the input but prefer TLS and warn.
+        - MIG-050 (MUST): Go template functions registered in ReplaceVariables (config_merge.go) are a shipped API contract — functions can be added but never removed, renamed, or have their signature changed (breaks previously-released llmisvcconfig YAML on upgrade).
+        - MIG-060 (MUST): llmisvcconfig template variable names/syntax/structure are versioned-by-prefix and shipped — existing variables can't be removed or change type.
+
+    - path: "cmd/**"
+      instructions: |
+        Binary entrypoints (rubric CTL-*, BUG-060).
+        - Removed/renamed CLI flags that are still referenced in config templates cause startup CrashLoopBackOff on upgrade — flag flag removals/renames.
+        - BUG-060 (MUST): New binaries/deps must be FIPS-compatible (CGO-enabled crypto, correct OpenSSL init). Flag CPU-specific instructions that SIGILL on older CPUs.
+
+    - path: "config/llmisvcconfig/**"
+      instructions: |
+        LLMInferenceServiceConfig base/overlay configs (rubric CFG-010/030/040, MIG-060, CTL-100).
+        - CFG-010 (MUST): Accelerator overlays only override the image — don't re-set securityContext / runAsNonRoot / hardening already defined in the base.
+        - CFG-030 (MUST): User/overlay configs override the minimum delta only — don't repeat values matching injected defaults.
+        - CFG-040 (SHOULD): Prefer embedding feature logic in these base configs (prefix-versioned) over controller code — config changes don't restart pods, controller changes do.
+        - MIG-060 / CTL-100 (MUST): Changes to template variables or pod-template fields here can break previously-shipped configs and change pod-template hashes on upgrade. Test rendering against the previous release's configs.
+
+    - path: "config/llmisvcconfig/config-llm-router-route.yaml"
+      instructions: |
+        LLM router HTTPRoute — cross-repo security contract (rubric SEC-065).
+        - SEC-065 (MUST): HTTPRoute paths and odh-model-controller's AuthPolicy rules are one contract. Every routable path prefix, header match, and catch-all pattern added here must have a corresponding authorization rule (or explicit deny) in the AuthPolicy template. A new route with no matching auth rule creates unauthenticated access or cross-tenant escalation. Cross-reference the AuthPolicy template when adding/changing routes.
+          Reference AuthPolicy template (odh-model-controller): https://raw.githubusercontent.com/opendatahub-io/odh-model-controller/refs/heads/incubating/internal/controller/resources/template/authpolicy_llm_isvc_userdefined.yaml
+
+    - path: "config/overlays/odh/**"
+      instructions: |
+        ODH overlay — HIGHEST bug/Blocker density (rubric SYNC-*, CFG-020, BUG-020/050/100, XREPO-*).
+        - SYNC-010 (MUST): Never inline-patch upstream-synced base files. Remove/patch via the ODH overlay instead — base edits create merge-conflict debt.
+        - SYNC-040 (SHOULD): Don't add downstream-only logic/comments to upstream-synced files; decouple into separate files/overlays.
+        - BUG-020/CFG-020 (MUST): Image references belong in params.env and are injected via kustomization; new images need a companion operator PR (kserve_support.go). No placeholder tags (controller:latest).
+        - BUG-050 (MUST): New CRD watches / API-group access need matching RBAC entries in the distro ClusterRole (config/overlays/odh/rbac/).
+        - BUG-100 (SHOULD): Kustomize replacement targets must reference fields that actually exist in the manifests, or the whole build breaks.
+
+    - path: "params.env"
+      instructions: |
+        Image parameters (rubric BUG-020, CFG-020, XREPO-010).
+        - Every image reference must have a matching kustomize replacement entry AND operator injection. Flag placeholder/latest tags and version-mismatched tags.
+        - New images require a companion PR in the operator/odh-model-controller (XREPO-010).
+
+    - path: "config/**"
+      instructions: |
+        Kustomize/config (rubric CFG-*, NAM-*, XREPO-*, BUG-020/070/090/100).
+        - NAM-010 (MUST): Prefix new Kubernetes resources with `kserve-` to avoid clashes in shared namespaces.
+        - NAM-020 (MUST): Keep webhook names stable across versions — renaming creates ghost webhooks during upgrades.
+        - BUG-070 (SHOULD): New metrics endpoints need ServiceMonitor/PodMonitor + NetworkPolicy rules; flag hardcoded matchNamespace.
+        - BUG-090 (SHOULD): New service ports need corresponding NetworkPolicy rules (Prometheus scraping is frequently blocked).
+        - XREPO-020 (SHOULD): New overlays/resources must be wired into the operator module or they won't be deployed.
+
+    - path: "**/*_test.go"
+      instructions: |
+        Go tests (rubric TST-*).
+        - TST-010 (MUST): A bug-fix PR must include a regression test that would have caught the bug.
+        - TST-020 (MUST): Tests must fail on error, not swallow it in try/except-style guards or log warnings on green checks.
+        - TST-060 (SHOULD): Add integration tests in *_int_test.go for controller logic.
+
+    - path: "test/**"
+      instructions: |
+        E2E / integration tests (rubric TST-*).
+        - TST-050 (SHOULD): Don't silently skip critical tests when a prerequisite (RHCL, CRD) is missing — fail loudly.
+        - TST-040 (SHOULD): API-version changes must cover both old and new versions end-to-end.
+        - TST-030 (SHOULD): Log actions with timestamps; collect related objects (pods, logs, InferencePools, HTTPRoutes) via part-of/component labels.
+
+    - path: "pkg/utils/storage.go"
+      instructions: |
+        Storage-initializer / modelcar pipeline — 26 bugs, 9 Blockers (rubric BUG-120, CTL-100).
+        - Watch for: argument-list overflow (large model lists exceed execve limits), HF_TOKEN/credentials not propagated to init containers, mutating webhook stripping storageUri, versioned model-path handling, multi-arch build breakage.
+        - Any change to command generation / init-container construction is also a CTL-100 pod-template-hash risk on upgrade.
+
+    - path: "**/workload_tls_self_signed.go"
+      instructions: |
+        TLS certificate generation (rubric SEC-010/020/030, SEC-075, BUG-060).
+        - SEC-010/020 (MUST): New sidecars/services that receive traffic from OUTSIDE their pod must be added to the certificate SANs/IPs and get matching TLS flags + volume mounts. Scope is the pod boundary: a container reached only by other containers in the same pod over loopback (localhost/127.0.0.1) does not terminate cross-pod TLS and needs no cert — don't flag it (see SEC-075).
+        - SEC-030 (MUST): Never use InsecureSkipVerify; gate TLS strategy on whether the target supports automatic cert rotation.
+        - BUG-060 (MUST): Self-signed cert generation must use FIPS-compliant algorithms.
+
+    - path: "Dockerfile*"
+      instructions: |
+        Container builds (rubric BUG-060).
+        - FIPS: Go binaries need CGO-enabled FIPS crypto; static linking can block OpenSSL.
+        - Verify multi-arch builds (ppc64le, s390x) still succeed.
+
+  tools:
+    ast-grep:
+      essential_rules: true
+      rule_dirs:
+        - ".coderabbit/ast-grep/rules"
+
+  pre_merge_checks:
+    # Built-in checks — keep as warnings so nothing hard-blocks initially.
+    title:
+      mode: warning
+    description:
+      mode: warning
+    docstrings:
+      mode: "off"
+    custom_checks:
+      - name: "Regression test for bug fixes (TST-010)"
+        mode: warning
+        instructions: |
+          If this PR fixes a bug (title/description/linked Jira indicates a fix, or it changes behavior in a controller/webhook/storage path), it MUST add or modify a test that would fail without the fix. Fail the check if a fix is present with no corresponding test change.
+      - name: "Upgrade restart safety (CTL-100 / BUG-010)"
+        mode: error
+        instructions: |
+          If the PR changes reconciler output that feeds a Deployment/StatefulSet/LWS pod template (annotations, labels, command/args strings, env vars, volume mounts, security context) OR changes config/llmisvcconfig templates, the PR description must state the upgrade-restart impact — i.e. confirm that upgrading only the controller binary (user CR unchanged) does not change the pod-template hash. Fail if such a change is present without that analysis.
+      - name: "Cross-repo companion changes (XREPO-010)"
+        mode: warning
+        instructions: |
+          If the PR adds/changes an image reference (params.env, kustomization, llmisvcconfig) or adds a new deployable resource, it must call out the companion change required in the operator / odh-model-controller (e.g. kserve_support.go injection). Fail if a new image/resource is introduced with no companion-PR note.
+      - name: "AuthPolicy/HTTPRoute coverage (SEC-065)"
+        mode: error
+        instructions: |
+          If the PR changes config/llmisvcconfig/config-llm-router-route.yaml (new path prefixes, header matches, catch-all patterns), the description must confirm the corresponding AuthPolicy template in odh-model-controller covers or explicitly denies every new route. Unmatched routable paths create unauthenticated access or cross-tenant escalation. Fail if new routes are added without this cross-reference.
+          Reference AuthPolicy template (odh-model-controller): https://raw.githubusercontent.com/opendatahub-io/odh-model-controller/refs/heads/incubating/internal/controller/resources/template/authpolicy_llm_isvc_userdefined.yaml
+      - name: "Backward-compatible API/templates (MIG-050/060)"
+        mode: warning
+        instructions: |
+          If the PR removes/renames a Go template function in ReplaceVariables (config_merge.go), or removes/renames/retypes an llmisvcconfig template variable, or removes/renames an API field, it MUST be flagged as breaking on upgrade. These are shipped contracts referenced by previously-released configs/CRs. Additive changes only; otherwise require documented migration.

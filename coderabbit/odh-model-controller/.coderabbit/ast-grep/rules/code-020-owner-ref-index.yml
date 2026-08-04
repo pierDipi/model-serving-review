@@ -1,0 +1,14 @@
+# CODE-020 (SHOULD) — Don't assume the first owner reference is yours.
+# https://ast-grep.github.io/guide/rule-config.html
+id: code-020-owner-ref-index
+language: go
+severity: warning
+message: "CODE-020: Indexing owner references at [0] assumes the first owner is yours."
+note: |
+  Don't assume OwnerReferences[0] belongs to your controller (rubric CODE-020).
+  Loop through the owner references and match by Kind/Name, and guard array
+  access with a length check to avoid an index-out-of-range panic.
+rule:
+  any:
+    - pattern: $OBJ.OwnerReferences[0]
+    - pattern: $OBJ.GetOwnerReferences()[0]

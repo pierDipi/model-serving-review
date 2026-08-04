@@ -1,0 +1,12 @@
+# SEC-030 (MUST) — Never disable TLS certificate verification.
+# https://ast-grep.github.io/guide/rule-config.html
+id: sec-030-insecure-skip-verify
+language: go
+severity: error
+message: "SEC-030: InsecureSkipVerify disables TLS certificate verification."
+note: |
+  Never set InsecureSkipVerify: true (rubric SEC-030). It disables TLS trust
+  and enables MITM. Gate the TLS strategy on whether the target component
+  supports automatic certificate rotation instead of skipping verification.
+rule:
+  pattern: "InsecureSkipVerify: true"

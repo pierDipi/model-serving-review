@@ -221,6 +221,24 @@ patchesStrategicMerge:
 > "Routing sidecar supports certificate rotation, it's automatic. I'm wondering if we want to annotate our configs and
 > gate on that here."
 
+### Plaintext Only Inside the Pod (SEC-075)
+
+```go
+// MUST: plaintext to a remote host (Service/peer pod/external) — flag, require TLS
+resp, _ := client.Get(fmt.Sprintf("http://%s/metrics", m.endpoint))
+
+// FINE: container-to-container within the same pod over loopback — do not flag
+resp, _ := client.Get("http://127.0.0.1:9090/metrics")
+
+// SHOULD (warning): user-provided URL that may be http:// — dev targets are valid.
+// Default to TLS, warn when plaintext, but don't reject the user's http:// input.
+endpoint := isvc.Spec.Predictor.CustomEndpoint // user-supplied
+```
+
+> Traffic crossing the pod boundary requires TLS. Loopback (localhost/127.0.0.1/::1) never leaves the pod and may be
+> plaintext. A user-supplied `http://` URL is a warning, not a hard finding — dev/test environments are legitimate
+> plaintext targets.
+
 ### Authorization Path Mismatch (SEC-060)
 
 ```yaml

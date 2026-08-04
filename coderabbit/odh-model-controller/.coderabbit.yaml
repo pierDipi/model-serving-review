@@ -1,0 +1,114 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+#
+# .coderabbit.yaml — opendatahub-io/odh-model-controller
+#
+# Generated from the model-serving-review skill rubric
+# (1,219 review comments + 759 Jira bugs). Each rule ID below maps 1:1 to
+# skills/model-serving-review/knowledge/review-rules.md in the model-serving-review repo.
+#
+# Deployment: copy this file AND the .coderabbit/ directory to the root of
+# opendatahub-io/odh-model-controller, on the default branch.
+# CodeRabbit also auto-loads AGENTS.md / CLAUDE.md as Code Guidelines if present.
+#
+# Layout note: this repo uses internal/controller/** (not pkg/controller/**),
+# and owns the AuthPolicy templates that pair with kserve's HTTPRoute config.
+language: en-US
+reviews:
+  profile: chill
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+
+  path_filters:
+    - "!vendor/**"
+    - "!**/zz_generated*.go"
+    - "!**/*.pb.go"
+    - "!**/*_generated.go"
+    - "!**/mock_*.go"
+    - "!**/testdata/**"
+
+  path_instructions:
+    - path: "internal/controller/**"
+      instructions: |
+        Controller/reconciler code (rubric CTL-*, CODE-*, BUG-050).
+        - CTL-100 (MUST, #1 Blocker source): Controller upgrades must NOT restart user workloads. Any change to reconciler output that alters a Deployment/StatefulSet/LWS pod-template spec (annotations, labels, command strings, env vars, volume mounts, security context) changes the pod-template hash and forces a rollout. Ask for every change: "If only the controller binary is upgraded and the user CR is unchanged, will existing pods restart?"
+        - CTL-010 (MUST): Exit-early — reverse guard conditions to avoid deep nesting.
+        - CTL-020 (MUST): Guard nil panics on nested spec access.
+        - CTL-030 (MUST): Never emit events on success/no-op — causes API-server load and client-side rate limiting. Use status conditions for continuous state.
+        - CTL-040 (MUST): CRUD on optional resources must handle both IsNotFound AND meta.IsNoMatchError (CRD not installed), and handle enabled→disabled transitions.
+        - CODE-020 (SHOULD): Don't assume owner-references[0] is yours — loop and match by kind/name; guard array access.
+        - BUG-050 (MUST): New CRD watches / new resource types / new API-group access need matching RBAC entries in the ClusterRole (and aggregated-role labels for user-facing CRDs).
+        - SEC-075 (MUST/SHOULD): Traffic that leaves the pod must use TLS — a hardcoded plaintext http:// (or insecure dial) to a Service, peer pod, or external host is a MUST finding. Do NOT flag container-to-container calls over loopback (localhost/127.0.0.1/::1) — that traffic never leaves the pod. When the plaintext target is a user-provided URL (config field, CR endpoint), downgrade to a warning: dev/test http:// targets are legitimate, so accept the input but prefer TLS and warn.
+
+    - path: "internal/controller/resources/authpolicy.go"
+      instructions: |
+        AuthPolicy reconciliation — high bug density (rubric SEC-060, CTL-100).
+        - Watch for AuthPolicy targeting a deleted HTTPRoute, and reconcile-on-stop failures.
+        - SEC-060 (MUST): Fail closed on authorization-path mismatch. When multiple auth rules exist (model-level SAR vs instance-level SAR), a request carrying a specific auth path's credentials/headers must be explicitly denied if it fails that path — it must not fall through to a weaker path or authn-only. The routing signal (header/path prefix) and the authorization check must agree on which resource is accessed.
+
+    - path: "internal/controller/**/template/**"
+      instructions: |
+        AuthPolicy / resource templates — cross-repo security contract (rubric SEC-065, SEC-070).
+        - SEC-070 (MUST): Validate every interpolated value in CEL expressions against injection. Template variables (e.g. {{.ModelRoutingHeader}}) rendered into CEL strings must pass a strict allowlist that blocks all CEL-significant characters (quotes, parentheses, backslashes, pipes, ampersands). Require unit tests for the validation function's edge cases.
+        - SEC-065 (MUST): AuthPolicy rules and kserve's HTTPRoute paths are one contract. Every routable path/header match in kserve's HTTPRoute template must have a corresponding authorization rule (or explicit deny) here. When changing auth templates, cross-reference the kserve HTTPRoute template — gaps create unauthenticated access or cross-tenant escalation.
+          Reference HTTPRoute template (opendatahub-io/kserve): https://raw.githubusercontent.com/opendatahub-io/kserve/refs/heads/master/config/llmisvcconfig/config-llm-router-route.yaml
+
+    - path: "internal/webhook/**"
+      instructions: |
+        Admission webhooks (rubric NAM-020, CTL-100).
+        - NAM-020 (MUST): Keep webhook names stable across versions — renaming creates ghost webhooks during upgrades (old name persists without match policy).
+        - Validate ConfigMap/CR fields defensively; flag changes that could alter pod-template output (CTL-100).
+
+    - path: "config/**"
+      instructions: |
+        Kustomize/config (rubric CFG-*, NAM-*, XREPO-*, BUG-020/050/070/090/100).
+        - NAM-010 (MUST): Prefix new Kubernetes resources with `kserve-` to avoid clashes in shared namespaces.
+        - BUG-020 (MUST): Image references need matching kustomize replacement entries and operator injection; no placeholder/latest tags.
+        - BUG-050 (MUST): New watches need RBAC in the ClusterRole.
+        - BUG-070/090 (SHOULD): New metrics ports need ServiceMonitor/PodMonitor + NetworkPolicy rules; flag hardcoded matchNamespace.
+        - BUG-100 (SHOULD): Kustomize replacement targets must reference fields that actually exist.
+        - XREPO-010/020 (MUST/SHOULD): Flag when a change needs a companion PR in kserve/operator, and ensure new overlays are wired into the operator module.
+
+    - path: "**/*_test.go"
+      instructions: |
+        Go tests (rubric TST-*).
+        - TST-010 (MUST): Bug-fix PRs must include a regression test that would fail without the fix.
+        - TST-020 (MUST): Tests must fail on error, not swallow it.
+        - TST-060 (SHOULD): Add integration tests for controller logic.
+
+  tools:
+    ast-grep:
+      essential_rules: true
+      rule_dirs:
+        - ".coderabbit/ast-grep/rules"
+
+  pre_merge_checks:
+    title:
+      mode: warning
+    description:
+      mode: warning
+    docstrings:
+      mode: "off"
+    custom_checks:
+      - name: "Regression test for bug fixes (TST-010)"
+        mode: warning
+        instructions: |
+          If this PR fixes a bug (title/description/linked Jira indicates a fix, or it changes controller/webhook behavior), it MUST add or modify a test that would fail without the fix. Fail if a fix is present with no corresponding test change.
+      - name: "Upgrade restart safety (CTL-100 / BUG-010)"
+        mode: error
+        instructions: |
+          If the PR changes reconciler output that feeds a Deployment/StatefulSet/LWS pod template (annotations, labels, command/args, env, volume mounts, security context), the description must confirm that upgrading only the controller binary (user CR unchanged) does not change the pod-template hash. Fail if such a change lacks that analysis.
+      - name: "RBAC for new watches (BUG-050)"
+        mode: error
+        instructions: |
+          If the PR adds a new watch, new resource type, or new API-group access in a controller, it must add corresponding RBAC (ClusterRole rules, and aggregated-role labels for user-facing CRDs). Fail if a new watch/resource access is introduced with no matching RBAC change.
+      - name: "AuthPolicy/HTTPRoute coverage (SEC-065)"
+        mode: error
+        instructions: |
+          If the PR changes an AuthPolicy template, the description must confirm every routable path/header in the opendatahub-io/kserve HTTPRoute template is still covered by an authorization rule or explicitly denied. Fail if auth templates change without this cross-reference, since gaps enable unauthenticated access or cross-tenant escalation.
+          Reference HTTPRoute template: https://raw.githubusercontent.com/opendatahub-io/kserve/refs/heads/master/config/llmisvcconfig/config-llm-router-route.yaml
+      - name: "CEL injection validation (SEC-070)"
+        mode: warning
+        instructions: |
+          If the PR interpolates a template variable into a CEL expression in an AuthPolicy template, it must validate that variable against a strict allowlist (blocking quotes, parentheses, backslashes, pipes, ampersands) and include unit tests for the validation. Fail if new CEL interpolation is added without validation + tests.
