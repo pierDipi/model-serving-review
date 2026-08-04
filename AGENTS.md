@@ -149,6 +149,14 @@ The finding-verifier returns verdicts:
 
 The orchestrator (SKILL.md) JSON-parses each agent's response. If parsing fails, the response is discarded.
 
+## CodeRabbit configs (derived port)
+
+The same rubric these agents apply is also ported to CodeRabbit configs under `coderabbit/` for always-on PR review
+(`opendatahub-io/kserve`, `odh-model-controller`). These are **derived** from `knowledge/review-rules.md`, which stays
+the single source of truth — CodeRabbit reviews without the agents' multi-pass verification, so its configs favor
+high-confidence, file-scoped rules and keep judgment-heavy checks as warnings. When you change a rule that has a clear
+file trigger or PR-level gate, update the matching `coderabbit/*/.coderabbit.yaml` too. See `coderabbit/README.md`.
+
 ## Testing
 
 Agents are tested via the eval harness in `evals/`. Each eval fixture creates a synthetic git repo with planted

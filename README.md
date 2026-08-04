@@ -19,6 +19,15 @@ Runs a multi-agent review pipeline on your diff:
 Coverage spans 50+ rules across controller patterns, API design, upstream sync, kustomize config, TLS/security,
 migration safety, testing, naming, cross-repo coordination, and 14 bug-prone patterns derived from real incidents.
 
+## Always-on review (CodeRabbit)
+
+The same rubric is also ported to [CodeRabbit](https://coderabbit.ai) configs under [`coderabbit/`](coderabbit/), so
+the rules run automatically on every PR without invoking the skill. There's a tuned `.coderabbit.yaml` per target repo
+(`opendatahub-io/kserve`, `odh-model-controller`) mapping rules to `path_instructions`, `pre_merge_checks`, and
+`ast-grep` structural rules. The skill and CodeRabbit are complementary — CodeRabbit gives lightweight always-on
+coverage; `/model-serving-review` runs the deep, adversarially-verified pass on demand. See
+[`coderabbit/README.md`](coderabbit/README.md) for the rule-to-mechanism mapping and deployment steps.
+
 ## Install
 
 ### From a marketplace
@@ -108,6 +117,10 @@ skills/
       repo.sh                   # Sandboxed git/gh operations for agents
       validate-cmd.sh           # PreToolUse hook — command whitelist for agents
       cleanup.sh                # Removes temp review directories
+coderabbit/                     # Same rubric ported to CodeRabbit configs (always-on PR review)
+  README.md                     # Rule-to-mechanism mapping + deployment
+  opendatahub-io-kserve/        # .coderabbit.yaml + ast-grep rules for opendatahub-io/kserve
+  odh-model-controller/         # .coderabbit.yaml + ast-grep rules for odh-model-controller
 evals/
   evals.json                    # Assertions: expected rules, files, finding counts
   run-evals.sh                  # Sets up synthetic repos from fixtures
@@ -257,6 +270,9 @@ The grader (`grade-results.sh`) checks the skill's JSON output against assertion
 2. Add a concrete example to `skills/model-serving-review/knowledge/examples.md`
 3. If the rule applies to a specific subsystem, add it to the relevant agent's "Rules to check" list
 4. Test against a PR that should trigger the new rule
+5. Keep the CodeRabbit configs in sync: if the rule is file-scoped or a PR-level gate, mirror it into the matching
+   `coderabbit/*/.coderabbit.yaml` (`path_instructions` / `pre_merge_checks`, or an `ast-grep` rule for structural
+   patterns). `review-rules.md` is the source of truth; the configs are a derived port.
 
 ### Modifying an agent
 
