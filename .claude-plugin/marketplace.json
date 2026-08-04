@@ -1,0 +1,30 @@
+{
+  "name": "model-serving-review",
+  "owner": {
+    "name": "Pierangelo Di Pilato",
+    "email": "pdipilat@redhat.com"
+  },
+  "metadata": {
+    "description": "Domain-specific code review for KServe and odh-model-controller, powered by rules extracted from 1,200+ review comments and 342 Jira bugs.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "model-serving-review",
+      "description": "Review KServe and odh-model-controller code against domain-specific rules derived from expert review history. Works locally on git diffs or remote PR URLs. Uses specialized subagents for controller, API, config, and safety review with adversarial verification. Invoke: /model-serving-review [options | PR-URL]",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills"
+      ],
+      "agents": [
+        "./agents/controller-reviewer.md",
+        "./agents/api-reviewer.md",
+        "./agents/config-reviewer.md",
+        "./agents/safety-reviewer.md",
+        "./agents/finding-verifier.md"
+      ],
+      "version": "1.0.0"
+    }
+  ]
+}
