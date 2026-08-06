@@ -141,6 +141,15 @@ fi
 
 DIFF_LINES=$(wc -l < "$REVIEW_DIR/full.diff")
 
+# Per-file added/removed line counts (for triage without ad-hoc bash loops).
+if [[ "$MODE" == "unstaged" ]]; then
+  git diff --numstat > "$REVIEW_DIR/numstat.txt" 2>/dev/null || true
+elif [[ "$MODE" == "staged" ]]; then
+  git diff --cached --numstat > "$REVIEW_DIR/numstat.txt" 2>/dev/null || true
+else
+  git diff $DIFF_ARGS --numstat > "$REVIEW_DIR/numstat.txt" 2>/dev/null || true
+fi
+
 # Write per-dimension filtered diffs
 if [[ "$MODE" == "unstaged" ]]; then
   git diff -- 'pkg/controller/' 'cmd/' > "$REVIEW_DIR/controller.diff" 2>/dev/null || true

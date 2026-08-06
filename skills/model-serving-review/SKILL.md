@@ -51,14 +51,17 @@ Fields in metadata.json:
 
 Pre-extracted files in review_dir:
 - `full.diff` — complete unified diff
+- `numstat.txt` — per-file added/removed line counts (`git diff --numstat`); use this for size/generated-code triage
 - `controller.diff` — filtered to pkg/controller/ and cmd/
 - `api.diff` — filtered to pkg/apis/ and *_types.go files
 - `config.diff` — filtered to config/, *.yaml, *.yml, params.env
 - `refs/` — cross-repo reference files (K8s conventions, architecture doc, HTTPRoute config, AuthPolicy template)
 
 If `diff_lines` is 0, stop: "No changes to review."
-If `diff_lines` > 3000, warn and ask the user whether to proceed or use `--focus`.
+If `diff_lines` > 3000, `Read` `numstat.txt` to see how much is generated code (CRDs, `zz_generated*`, deepcopy) before warning; then warn and ask the user whether to proceed or use `--focus`.
 If `--focus` was specified, note it for agents to filter further.
+
+**Never hand-roll raw bash for triage** (no `cd … && for … done`, no `$(git diff … | wc -l)` loops). These aren't in `allowed-tools`, so they prompt for approval on every call — and the reviewer hook denies command substitution outright. Instead: `Read` the pre-extracted files (`numstat.txt`, `full.diff`, `metadata.json`), or for any ad-hoc git query use the auto-allowed wrapper: `bash $scripts_dir/repo.sh $work_dir diff --numstat [args]` (also `log`, `show`, `grep`, `ls-files`).
 
 ## Step 2: Read Review Rules and Risk Map
 
