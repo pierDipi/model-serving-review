@@ -1,2 +1,5 @@
 /.tokensave
 /.claude/.headroom_wrap_marker.json
+
+# Generated eval artifacts (fixtures, skill outputs, grades)
+/evals/results/

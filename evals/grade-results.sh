@@ -32,11 +32,11 @@ for fixture_dir in "$RESULTS_DIR"/*/; do
   output_file="$fixture_dir/output.json"
   setup_file="$fixture_dir/setup.json"
 
-  ((TOTAL++))
+  TOTAL=$((TOTAL+1))
 
   if [[ ! -f "$output_file" ]]; then
     echo "SKIP $fixture — no output.json"
-    ((SKIP++))
+    SKIP=$((SKIP+1))
     continue
   fi
 
@@ -44,7 +44,7 @@ for fixture_dir in "$RESULTS_DIR"/*/; do
   expected=$(jq -r --arg id "$fixture" '.evals[] | select(.id == $id) | .assertions' "$EVALS_JSON" 2>/dev/null)
   if [[ -z "$expected" || "$expected" == "null" ]]; then
     echo "SKIP $fixture — no assertions in evals.json"
-    ((SKIP++))
+    SKIP=$((SKIP+1))
     continue
   fi
 
@@ -106,17 +106,20 @@ for fixture_dir in "$RESULTS_DIR"/*/; do
 
   if $fixture_pass; then
     echo "PASS $fixture"
-    ((PASS++))
+    PASS=$((PASS+1))
   else
     echo "FAIL $fixture"
-    ((FAIL++))
+    FAIL=$((FAIL+1))
   fi
   echo -e "$fixture_details"
 done
 
 echo "=== Summary ==="
 echo "Total: $TOTAL | Pass: $PASS | Fail: $FAIL | Skip: $SKIP"
-if [[ $TOTAL -gt 0 ]]; then
-  pct=$((PASS * 100 / (TOTAL - SKIP)))
-  echo "Pass rate: ${pct}% (of graded)"
+graded=$((TOTAL - SKIP))
+if [[ $graded -gt 0 ]]; then
+  pct=$((PASS * 100 / graded))
+  echo "Pass rate: ${pct}% (of $graded graded)"
+else
+  echo "Pass rate: n/a (no fixtures graded)"
 fi

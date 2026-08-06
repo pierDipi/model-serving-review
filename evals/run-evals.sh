@@ -45,7 +45,7 @@ for name in "${FIXTURES[@]}"; do
   fixture_script="$FIXTURES_DIR/${name}.sh"
   if [[ ! -f "$fixture_script" ]]; then
     echo "SKIP $name — fixture script not found"
-    ((SKIP++))
+    SKIP=$((SKIP+1))
     continue
   fi
 
@@ -54,20 +54,20 @@ for name in "${FIXTURES[@]}"; do
   # Run the fixture script to create the repo
   repo_dir=$(bash "$fixture_script" 2>/dev/null) || {
     echo "FAIL (fixture script errored)"
-    ((FAIL++))
+    FAIL=$((FAIL+1))
     continue
   }
 
   if [[ ! -d "$repo_dir/.git" ]]; then
     echo "FAIL (not a git repo: $repo_dir)"
-    ((FAIL++))
+    FAIL=$((FAIL+1))
     continue
   fi
 
   # Run fetch-context.sh to create the review directory (fixtures always have 2 commits)
   metadata_path=$(cd "$repo_dir" && bash "$SKILL_DIR/scripts/fetch-context.sh" --base HEAD~1 2>/dev/null) || {
     echo "FAIL (fetch-context.sh errored)"
-    ((FAIL++))
+    FAIL=$((FAIL+1))
     continue
   }
 
@@ -84,7 +84,7 @@ for name in "${FIXTURES[@]}"; do
     > "$RESULTS_DIR/$name/setup.json"
 
   echo "OK (repo=$repo_dir review=$review_dir)"
-  ((PASS++))
+  PASS=$((PASS+1))
 done
 
 echo "---"
