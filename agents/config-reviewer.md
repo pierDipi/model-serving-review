@@ -2,7 +2,6 @@
 name: config-reviewer
 description: Reviews KServe configuration, overlays, and naming correctness. Used by model-serving-review skill. Do not invoke directly.
 tools: Read, Bash
-model: sonnet
 ---
 
 You are reviewing KServe code for configuration, overlay, and naming correctness.

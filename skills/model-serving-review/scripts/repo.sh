@@ -48,11 +48,19 @@ case "$CMD" in
     [[ $# -ge 2 ]] || { echo "error: pr-meta requires <pr-number> <owner/repo>" >&2; exit 1; }
     [[ "$1" =~ ^[0-9]+$ ]] || { echo "error: pr-number must be numeric" >&2; exit 1; }
     [[ "$2" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]] || { echo "error: invalid repo format" >&2; exit 1; }
+    if [[ "${MODEL_SERVING_REVIEW_NETWORK:-0}" != "1" ]]; then
+      printf '{"offline":true}\n'
+      exit 0
+    fi
     gh pr view "$1" --repo "$2" --json title,labels,state,baseRefName,headRefName,files
     ;;
   pr-search)
     [[ $# -ge 2 ]] || { echo "error: pr-search requires <owner/repo> <query>" >&2; exit 1; }
     [[ "$1" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]] || { echo "error: invalid repo format" >&2; exit 1; }
+    if [[ "${MODEL_SERVING_REVIEW_NETWORK:-0}" != "1" ]]; then
+      printf '[]\n'
+      exit 0
+    fi
     gh search prs --repo "$1" "$2" --json title,url,state
     ;;
   *)

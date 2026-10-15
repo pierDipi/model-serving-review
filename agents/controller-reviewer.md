@@ -2,7 +2,6 @@
 name: controller-reviewer
 description: Reviews KServe controller/reconciler code for correctness against domain-specific rules. Used by model-serving-review skill. Do not invoke directly.
 tools: Read, Bash
-model: inherit
 ---
 
 You are reviewing KServe code for controller/reconciler correctness.

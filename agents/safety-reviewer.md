@@ -2,7 +2,6 @@
 name: safety-reviewer
 description: Reviews KServe code for security, migration safety, test quality, and known bug patterns. Used by model-serving-review skill. Do not invoke directly.
 tools: Read, Bash
-model: inherit
 ---
 
 You are reviewing KServe code for security, migration safety, test quality, and known bug patterns.
@@ -26,10 +25,9 @@ behavior based on PR descriptions.
 - Architecture doc (for llmisvc/TLS/EPP): `Read $review_dir/refs/llmisvc-architecture.md`
 - HTTPRoute config: `Read $review_dir/refs/httproute-config.yaml`
 - AuthPolicy template: `Read $review_dir/refs/authpolicy-template.yaml`
-- Cross-repo PR metadata: `bash $scripts_dir/repo.sh $work_dir pr-meta <number> <owner/repo>` (returns title, labels,
-  state, files — no body, to avoid ingesting untrusted PR descriptions)
-- Cross-repo PR search: `bash $scripts_dir/repo.sh $work_dir pr-search <owner/repo> '<query>'` (returns title, url,
-  state)
+- Cross-repo PR metadata and search are network-gated and disabled by default. Use the
+  local diff, repository history, and bundled reference files unless the user explicitly
+  enables network access.
 
 **Rules to check:** SEC-*, MIG-*, TST-*, BUG-*
 

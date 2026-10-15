@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+
 # fetch-context.sh — Gathers review context and writes it to a review directory.
 # Outputs the path to metadata.json (read it with the Read tool — no jq needed).
 # Diffs are written as separate files, not embedded in JSON.
@@ -9,6 +11,7 @@ MODE=""
 BASE_REF=""
 PR_URL=""
 WORK_DIR=""
+REPO_PATH=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -16,6 +19,7 @@ while [[ $# -gt 0 ]]; do
     --unstaged) MODE="unstaged"; shift ;;
     --branch)   MODE="branch"; shift ;;
     --base)     MODE="base"; BASE_REF="$2"; shift 2 ;;
+    --repo)     REPO_PATH="$2"; shift 2 ;;
     https://github.com/*/pull/*)
       PR_URL="$1"; shift ;;
     *)          shift ;;
@@ -25,28 +29,21 @@ done
 # Always create a review directory under /tmp
 REVIEW_DIR=$(mktemp -d "/tmp/model-serving-review-XXXXXX")
 
-# If a PR URL was given, clone the repo into $REVIEW_DIR/repo
+# If a PR URL was given, use the pre-checked-out repository supplied by --repo.
 if [[ -n "$PR_URL" ]]; then
   PR_REPO=$(echo "$PR_URL" | sed -E 's|https://github.com/([^/]+/[^/]+)/pull/.*|\1|')
   PR_NUMBER=$(echo "$PR_URL" | sed -E 's|.*/pull/([0-9]+).*|\1|')
 
-  WORK_DIR="$REVIEW_DIR/repo"
-  git clone --filter=blob:none "https://github.com/${PR_REPO}.git" "$WORK_DIR" 2>/dev/null
+  if [[ -n "$REPO_PATH" ]]; then
+    WORK_DIR="$REPO_PATH"
+  elif [[ -n "${MODEL_SERVING_REVIEW_REPO:-}" ]]; then
+    WORK_DIR="$MODEL_SERVING_REVIEW_REPO"
+  else
+    echo "error: PR URL mode requires --repo <path> pointing to a pre-checked-out PR head" >&2
+    exit 2
+  fi
   cd "$WORK_DIR"
-
-  PR_JSON=$(gh pr view "$PR_NUMBER" --repo "$PR_REPO" --json headRefName,baseRefName 2>/dev/null)
-  PR_BASE=$(echo "$PR_JSON" | jq -r '.baseRefName')
-
-  git fetch origin "$PR_BASE" "pull/${PR_NUMBER}/head:pr-${PR_NUMBER}" 2>/dev/null
-  git checkout "pr-${PR_NUMBER}" 2>/dev/null
-
-  # Use merge-base to get the exact fork point — not the tip of the base branch.
-  # Without this, commits merged to the base branch after the PR was opened
-  # appear in the diff as "removed" lines, causing false-positive findings.
-  MERGE_BASE_COMMIT=$(git merge-base HEAD "origin/${PR_BASE}" 2>/dev/null || echo "origin/${PR_BASE}")
-
-  MODE="base"
-  BASE_REF="$MERGE_BASE_COMMIT"
+  MODE="branch"
 else
   WORK_DIR=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
   cd "$WORK_DIR"
@@ -54,7 +51,11 @@ fi
 
 detect_repo() {
   local url
-  url=$(git remote get-url origin 2>/dev/null || true)
+  for remote in upstream origin; do
+    if url=$(git remote get-url "$remote" 2>/dev/null); then
+      break
+    fi
+  done
   if [[ "$url" =~ github\.com[:/]([^/]+/[^/.]+) ]]; then
     echo "${BASH_REMATCH[1]}"
   else
@@ -64,18 +65,20 @@ detect_repo() {
 
 default_branch() {
   local ref
-  ref=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || echo "")
-  if [[ -n "$ref" ]]; then
-    echo "${ref##*/}"
-  else
+  for remote in upstream origin; do
+    ref=$(git symbolic-ref "refs/remotes/${remote}/HEAD" 2>/dev/null || echo "")
+    if [[ -n "$ref" ]]; then
+      echo "${ref##*/}"
+      return
+    fi
     for candidate in main master; do
-      if git rev-parse --verify "origin/${candidate}" &>/dev/null; then
-        echo "$candidate"
+      if git rev-parse --verify "${remote}/${candidate}" &>/dev/null; then
+        echo "${remote}/${candidate}"
         return
       fi
     done
-    echo "main"
-  fi
+  done
+  echo "master"
 }
 
 REPO=$(detect_repo)
@@ -100,7 +103,7 @@ case "$MODE" in
     SOURCE_DESC="unstaged changes"
     ;;
   branch)
-    MERGE_BASE=$(git merge-base HEAD "origin/${DB}" 2>/dev/null || echo "HEAD~1")
+    MERGE_BASE=$(git merge-base HEAD "$DB" 2>/dev/null || echo "HEAD~1")
     DIFF_ARGS="${MERGE_BASE}..HEAD"
     SOURCE_DESC="branch ${LOCAL_BRANCH} vs ${DB} ($(git rev-parse --short "${MERGE_BASE}")..$(git rev-parse --short HEAD))"
     ;;
@@ -192,8 +195,6 @@ to_json_array() {
     echo "$input" | jq -R . | jq -s .
   fi
 }
-
-SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 
 jq -n \
   --arg scripts_dir "$SCRIPTS_DIR" \

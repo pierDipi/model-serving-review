@@ -1,12 +1,9 @@
 ---
 name: model-serving-review
 description: >-
-  Review Model Serving code (KServe, odh-model-controller) against domain-specific rules
-  derived from 1,200+ historical review comments and 342 Jira bugs. Works locally on git
-  diffs or remote PR URLs. Uses custom subagents with locked-down tool access and command
-  validation hooks. Invoke: /model-serving-review [options | PR-URL]
-argument-hint: "[--staged | --unstaged | --branch | --base <ref> | <PR-URL>]"
-disable-model-invocation: true
+  Review KServe and odh-model-controller Model Serving changes against domain-specific
+  rules derived from historical expert reviews and incident reports. Supports local git
+  diffs and GitHub PR URLs. Invoke explicitly for a deep, adversarially verified review.
 allowed-tools: Bash(bash ${CLAUDE_SKILL_DIR}/*), Bash(rm -rf /tmp/model-serving-review-*), Bash(wc *), Read, Agent(controller-reviewer, api-reviewer, config-reviewer, safety-reviewer, finding-verifier)
 ---
 
@@ -14,7 +11,14 @@ allowed-tools: Bash(bash ${CLAUDE_SKILL_DIR}/*), Bash(rm -rf /tmp/model-serving-
 
 Review Model Serving code changes against domain-specific rules extracted from expert review history.
 
-**Prerequisites:** Run from inside a cloned repo (kserve/kserve, opendatahub-io/kserve, or opendatahub-io/odh-model-controller), OR pass a GitHub PR URL to clone and review remotely.
+**Prerequisites:** Run from inside a cloned repo (kserve/kserve, opendatahub-io/kserve, or opendatahub-io/odh-model-controller), OR pass a GitHub PR URL to check out and review remotely.
+
+## Runtime Dispatch
+
+`SKILL_DIR` below means the absolute path of the directory containing this `SKILL.md`:
+
+- **Codex:** use the skill path supplied by the skill loader. If a multi-agent tool is available, launch independent reviewer agents using the portable role prompts in `references/reviewer-roles.md`; otherwise perform the applicable roles sequentially in this session. Use the runtime's file-read mechanism when available, and `bash "$scripts_dir/repo.sh" "$work_dir" cat <path>` otherwise.
+- **Claude Code:** substitute `${CLAUDE_SKILL_DIR}` for `SKILL_DIR`, and launch the typed agents named in Step 3.
 
 **Arguments:** `$ARGUMENTS` — optional flags:
 - **(empty)** — diff current branch vs merge-base with default branch
@@ -22,27 +26,30 @@ Review Model Serving code changes against domain-specific rules extracted from e
 - **`--unstaged`** — review only unstaged changes
 - **`--branch`** — same as empty (explicit)
 - **`--base <ref>`** — diff HEAD vs a specific ref
-- **`<PR-URL>`** — GitHub PR URL. Clones to temp dir, diffs against the PR's base branch.
+- **`--repo <path>`** — use an existing local repository instead of cloning
+- **`<PR-URL>`** — GitHub PR URL. Checks out the PR head into a temporary repository and reviews it.
 - **`--comment <PR>`** — after review, post results as a comment on the given PR number
 - **`--focus <path>`** — only review files matching this path prefix
 
 ## Step 1: Gather Context
 
-Run the fetch script. It creates a review directory with pre-extracted diffs and reference files, and prints the path to metadata.json:
+If the arguments contain a GitHub PR URL, prepare a temporary repository and check out the
+PR head using separate tool calls so the approved `gh pr checkout` prefix is recognized:
 
-```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/fetch-context.sh $ARGUMENTS
-```
+1. Run `mktemp -d /tmp/model-serving-review-pr-XXXXXX` and use the printed path as `PR_REPO_DIR`.
+2. With `workdir` set to `PR_REPO_DIR`, run `git init -q`.
+3. With `workdir` set to `PR_REPO_DIR`, run
+   `git remote add origin https://github.com/<owner>/<repo>.git`.
+4. With `workdir` set to `PR_REPO_DIR`, run
+   `gh pr checkout <number> --repo <owner>/<repo> --detach`.
+5. Run `bash "${SKILL_DIR}/scripts/fetch-context.sh" --repo PR_REPO_DIR --branch`.
 
-Read the metadata file with the Read tool (the script prints its path):
-```
-Read /tmp/model-serving-review-XXXXXX/metadata.json
-```
+For local diffs, run the fetch script directly with the applicable mode and omit `--repo`.
 
 Fields in metadata.json:
 - `scripts_dir` — absolute path to repo.sh and other scripts (use this in agent prompts instead of relative paths)
 - `review_dir` — path to the review directory (contains diffs and reference files)
-- `work_dir` — path to the repo root (local checkout or temp clone)
+- `work_dir` — path to the repo root (local checkout or pre-checked-out PR repository)
 - `repo` — detected from git remote
 - `is_odh` — true for opendatahub-io repos
 - `source_desc` — human-readable description of what's being reviewed
@@ -66,9 +73,10 @@ If `--focus` was specified, note it for agents to filter further.
 ## Step 2: Read Review Rules and Risk Map
 
 ```
-Read ${CLAUDE_SKILL_DIR}/knowledge/review-rules.md
-Read ${CLAUDE_SKILL_DIR}/knowledge/examples.md
-Read ${CLAUDE_SKILL_DIR}/knowledge/critical-areas.md
+Read ${SKILL_DIR}/knowledge/review-rules.md
+Read ${SKILL_DIR}/knowledge/examples.md
+Read ${SKILL_DIR}/knowledge/critical-areas.md
+Read ${SKILL_DIR}/references/reviewer-roles.md
 ```
 
 Check which changed files fall in Tier 1 or Tier 2 hot files from critical-areas.md. Include matching risk context in the relevant agent prompt.
@@ -76,33 +84,34 @@ Check which changed files fall in Tier 1 or Tier 2 hot files from critical-areas
 ## Step 3: Parallel Review — Pass 1 (Recall)
 
 Launch applicable review agents simultaneously as typed subagents. Each agent reads its own diff file from review_dir and has access to repo.sh for deeper investigation.
+Reviewers must not run tests, builds, or other side-effecting commands; CI owns test execution.
 
 Pass to each agent: `scripts_dir`, `review_dir`, `work_dir`, `source_desc`, `repo`, changed file lists, the applicable rules from review-rules.md, matching examples from examples.md, and any risk context from critical-areas.md.
 
-### Agent: controller-reviewer
+### Role: controller-reviewer
 **Launch when:** `go_files` includes paths under `pkg/controller/` or `cmd/`.
-**Spawn as:** `Agent(subagent_type: "controller-reviewer")`
+**Claude agent:** `controller-reviewer`; **Codex role:** `controller-reviewer`
 **Pass in prompt:** scripts_dir, review_dir, work_dir, source_desc, repo, filtered go_files, CTL/CODE/MIG-050/MIG-060 rules and examples, risk context for Tier 1/2 files.
 **Note:** If files touch `pkg/controller/*/llmisvc/` or `config/llmisvcconfig/`, mention that `$review_dir/refs/llmisvc-architecture.md` is available.
 
-### Agent: api-reviewer
+### Role: api-reviewer
 **Launch when:** `api_files` is non-empty.
-**Spawn as:** `Agent(subagent_type: "api-reviewer")`
+**Claude agent:** `api-reviewer`; **Codex role:** `api-reviewer`
 **Pass in prompt:** scripts_dir, review_dir, work_dir, source_desc, repo, api_files, API-* rules and examples.
 **Note:** Mention that `$review_dir/refs/k8s-api-conventions.md` is available.
 
-### Agent: config-reviewer
+### Role: config-reviewer
 **Launch when:** `config_files` is non-empty.
-**Spawn as:** `Agent(subagent_type: "config-reviewer")`
+**Claude agent:** `config-reviewer`; **Codex role:** `config-reviewer`
 **Pass in prompt:** scripts_dir, review_dir, work_dir, source_desc, repo, is_odh, config_files, CFG/SYNC/NAM/XREPO rules and examples.
 
-### Agent: safety-reviewer
+### Role: safety-reviewer
 **Launch when:** any of `go_files`, `config_files`, or `api_files` are non-empty.
-**Spawn as:** `Agent(subagent_type: "safety-reviewer")`
+**Claude agent:** `safety-reviewer`; **Codex role:** `safety-reviewer`
 **Pass in prompt:** scripts_dir, review_dir, work_dir, source_desc, repo, all file lists, SEC/MIG/TST/BUG rules and examples, risk context.
 **Note:** If files touch llmisvc/TLS/EPP/AuthPolicy/HTTPRoute, mention which refs/ files are available.
 
-Only launch agents for dimensions with applicable changed files.
+Only launch roles for dimensions with applicable changed files. In Codex, launch the applicable roles in parallel when a multi-agent tool is available; otherwise run them sequentially without skipping a role.
 
 ## Step 4: Pass 2 — Precision Filter
 
@@ -111,7 +120,7 @@ Collect all findings from Pass 1. **Output isolation:** JSON-parse each agent's 
 For findings with confidence < 90:
 
 Launch **finding-verifier** agents (batch up to 5 findings per agent):
-**Spawn as:** `Agent(subagent_type: "finding-verifier")`
+**Claude agent:** `finding-verifier`; **Codex role:** `finding-verifier`
 **Pass in prompt:** scripts_dir, review_dir, work_dir, source_desc, repo, and the findings to verify.
 
 Drop refuted findings. Keep confirmed findings and all findings with confidence >= 90.
@@ -154,7 +163,7 @@ Print the report to the terminal.
 
 Delete the review directory after the review is complete:
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/cleanup.sh <review_dir>
+bash "${SKILL_DIR}/scripts/cleanup.sh" <review_dir>
 ```
 
 ## Notes
@@ -162,4 +171,4 @@ bash ${CLAUDE_SKILL_DIR}/scripts/cleanup.sh <review_dir>
 - For opendatahub-io/kserve repos, SYNC rules are critical — always run config-reviewer.
 - For kserve/kserve repos, SYNC rules about overlay discipline don't apply.
 - Large diffs (>100 files): warn and suggest `--focus <path>`.
-- Reference files (review-rules.md, examples.md, critical-areas.md) are bundled in `${CLAUDE_SKILL_DIR}/knowledge/`.
+- Reference files (review-rules.md, examples.md, critical-areas.md) are bundled in `${SKILL_DIR}/knowledge/`; portable reviewer prompts are bundled in `${SKILL_DIR}/references/`.

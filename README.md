@@ -4,7 +4,8 @@ Domain-specific code review for [KServe](https://github.com/kserve/kserve)
 and [odh-model-controller](https://github.com/opendatahub-io/odh-model-controller), powered by rules extracted from
 1,200+ expert review comments and 342 Jira bugs (93 Blocker, 63 Critical).
 
-Works as a Claude Code plugin — install once, invoke from any KServe checkout.
+Works as a Codex skill by default and remains compatible with the Claude Code plugin —
+install once, invoke from any KServe checkout.
 
 ## What it does
 
@@ -25,12 +26,38 @@ The same rubric is also ported to [CodeRabbit](https://coderabbit.ai) configs un
 the rules run automatically on every PR without invoking the skill. There's a tuned `.coderabbit.yaml` per target repo
 (`opendatahub-io/kserve`, `odh-model-controller`) mapping rules to `path_instructions`, `pre_merge_checks`, and
 `ast-grep` structural rules. The skill and CodeRabbit are complementary — CodeRabbit gives lightweight always-on
-coverage; `/model-serving-review` runs the deep, adversarially-verified pass on demand. See
+coverage; `$model-serving-review` runs the deep, adversarially-verified pass on demand. See
 [`coderabbit/README.md`](coderabbit/README.md) for the rule-to-mechanism mapping and deployment steps.
 
 ## Install
 
-### From a marketplace
+### Codex (default)
+
+Install `skills/model-serving-review` as a Codex skill. From a Codex session, ask the
+skill installer to install:
+
+```text
+<owner>/model-serving-review at skills/model-serving-review
+```
+
+For local development, copy or symlink that directory into:
+
+```bash
+${CODEX_HOME:-$HOME/.codex}/skills/model-serving-review
+```
+
+To enable the current checkout directly, run:
+
+```bash
+cd /path/to/model-serving-review
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s "$PWD/skills/model-serving-review" \
+  "${CODEX_HOME:-$HOME/.codex}/skills/model-serving-review"
+```
+
+Start a new Codex session after creating the link so the skill is discovered.
+
+### Claude Code
 
 If your team maintains a skills marketplace (e.g., `opendatahub-io/skills-registry`), ask to have this repo added. Then:
 
@@ -38,7 +65,7 @@ If your team maintains a skills marketplace (e.g., `opendatahub-io/skills-regist
 /plugin install model-serving-review@<marketplace-name>
 ```
 
-### As a standalone marketplace
+#### As a standalone marketplace
 
 Register this repo directly as a single-plugin marketplace:
 
@@ -47,13 +74,17 @@ Register this repo directly as a single-plugin marketplace:
 /plugin install model-serving-review@model-serving-review
 ```
 
-### Local development install
-
-See [Local testing](#local-testing) below.
-
 ## Usage
 
 From inside a KServe or odh-model-controller checkout:
+
+Codex:
+
+```text
+Use $model-serving-review
+```
+
+Claude Code:
 
 ```
 /model-serving-review
@@ -68,11 +99,30 @@ From inside a KServe or odh-model-controller checkout:
 | `--unstaged`     | Review only unstaged changes                              |
 | `--branch`       | Same as empty (explicit)                                  |
 | `--base <ref>`   | Diff HEAD vs a specific ref                               |
-| `<PR-URL>`       | GitHub PR URL — clones to temp dir, diffs against PR base |
+| `--repo <path>`  | Use an existing local repository instead of a remote clone |
+| `<PR-URL>`       | GitHub PR URL — checks out into a temporary repository; needs network access |
 | `--focus <path>` | Only review files matching this path prefix               |
 | `--comment <PR>` | Post results as a PR comment (requires user approval)     |
 
 ### Examples
+
+Codex:
+
+```text
+# Review current branch
+Use $model-serving-review
+
+# Review a remote PR
+Use $model-serving-review https://github.com/kserve/kserve/pull/1234
+
+# Review only staged changes
+Use $model-serving-review --staged
+
+# Focus on controller code
+Use $model-serving-review --focus pkg/controller/
+```
+
+Claude Code:
 
 ```bash
 # Review current branch
@@ -90,7 +140,7 @@ From inside a KServe or odh-model-controller checkout:
 
 ## Prerequisites
 
-- [Claude Code](https://docs.claude.com/en/docs/claude-code) with plugin support
+- Claude Code with plugin support and/or Codex with skill support
 - `git`, `jq`, `curl` available in PATH
 - `gh` CLI (for PR URL mode and cross-repo lookups)
 
@@ -108,10 +158,13 @@ agents/
 skills/
   model-serving-review/
     SKILL.md                    # Orchestrator — drives the review pipeline
+    agents/openai.yaml          # Codex UI metadata and explicit-invocation policy
     knowledge/
       review-rules.md           # 50+ review rules with IDs and severity
       examples.md               # Concrete patterns from review history
       critical-areas.md         # Bug-density map for risk-weighted attention
+    references/
+      reviewer-roles.md         # Portable Codex reviewer and verifier prompts
     scripts/
       fetch-context.sh          # Gathers diffs, classifies files, fetches refs
       repo.sh                   # Sandboxed git/gh operations for agents
@@ -124,6 +177,7 @@ coderabbit/                     # Same rubric ported to CodeRabbit configs (alwa
 evals/
   evals.json                    # Assertions: expected rules, files, finding counts
   run-evals.sh                  # Sets up synthetic repos from fixtures
+  run-skill.sh                  # Runs installed skill with Codex or Claude
   grade-results.sh              # Grades skill output against assertions
   fixtures/
     common.sh                   # Shared helpers (init_repo, write_file, commit)
@@ -133,9 +187,24 @@ evals/
 
 ## Local testing
 
-### 1. Register as a local marketplace
+### Validate the Codex skill
 
-From the root of this repo:
+```bash
+make validate-skill
+```
+
+### Test with Codex
+
+Enable the checkout as shown above, start a new Codex session in a KServe checkout, and
+invoke:
+
+```text
+Use $model-serving-review
+```
+
+### Test with Claude Code
+
+From the root of this repo, register a local marketplace:
 
 ```
 /plugin marketplace add ./
@@ -144,15 +213,13 @@ From the root of this repo:
 This registers the current directory as a marketplace. Claude Code reads `.claude-plugin/marketplace.json` to discover
 the plugin.
 
-### 2. Install the plugin
+Install the plugin:
 
 ```
 /plugin
 ```
 
 Select **model-serving-review** and install it (user or project scope).
-
-### 3. Test the skill
 
 Switch to a KServe checkout with some changes and invoke:
 
@@ -166,23 +233,20 @@ Or test against a specific PR:
 /model-serving-review https://github.com/kserve/kserve/pull/1234
 ```
 
-### 4. Clean up after testing
-
-Remove the local marketplace:
+When finished, remove the local marketplace:
 
 ```
 /plugin marketplace remove model-serving-review
 ```
 
-Then reinstall from the git-hosted marketplace when ready.
-
 ### Iterating on changes
 
 After editing skill, agent, or script files:
 
-1. Reinstall the plugin: `/plugin install model-serving-review@model-serving-review`
-2. Start a new conversation (`/clear` or new session) so Claude reloads the updated definitions
-3. Run the skill against a known PR to verify
+1. Refresh the installed Codex skill copy and start a new Codex session
+2. For Claude Code, reinstall the plugin: `/plugin install model-serving-review@model-serving-review`
+3. Start a new conversation (`/clear` or new session) so Claude reloads the updated definitions
+4. Run the skill against a known PR to verify
 
 ### Verifying the hook sandbox
 
@@ -217,14 +281,27 @@ repos with planted violations.
 # 1. Set up all fixture repos (or pass specific names)
 bash evals/run-evals.sh
 
-# 2. For each fixture, invoke the skill from its repo_dir
+# 2. Run the installed skill over every fixture (Codex by default)
+RUNTIME=codex bash evals/run-skill.sh $RESULTS_DIR
+
+# Or run with Claude Code
+RUNTIME=claude bash evals/run-skill.sh $RESULTS_DIR
+```
+
+To invoke one fixture manually from its repo directory, use:
+
+```text
+Use $model-serving-review --base HEAD~1
+```
+
+For Claude Code:
+
+```bash
 cd /tmp/eval-fixture-ctl-010-deep-nesting-XXXXXX
 /model-serving-review --base HEAD~1
-# Save output to $RESULTS_DIR/<fixture>/output.json
-
-# 3. Grade results
-bash evals/grade-results.sh $RESULTS_DIR
 ```
+
+Then grade results with `bash evals/grade-results.sh $RESULTS_DIR`.
 
 ### How fixtures work
 

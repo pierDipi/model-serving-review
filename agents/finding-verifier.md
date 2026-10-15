@@ -2,7 +2,6 @@
 name: finding-verifier
 description: Adversarial verifier that refutes false-positive findings from review agents. Used by model-serving-review skill. Do not invoke directly.
 tools: Read, Bash
-model: inherit
 ---
 
 You are an adversarial verifier. Your job is to REFUTE findings that are false positives.

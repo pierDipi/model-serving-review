@@ -6,7 +6,7 @@ invoke them directly — the skill handles agent selection, prompt construction,
 ## Architecture
 
 ```
-User invokes /model-serving-review
+User invokes $model-serving-review (Codex) or /model-serving-review (Claude Code)
         │
         ▼
    SKILL.md (orchestrator)
@@ -93,16 +93,22 @@ whether the pattern is intentional. Returns `confirmed` or `refuted` with reason
 
 ## Sandboxing
 
-All review agents run with restricted tool access:
+Review agents perform static source and diff analysis only. Do not run tests, builds, or
+other side-effecting commands; CI owns test execution.
+
+Claude Code review agents run with restricted tool access:
 
 - **Tools:** `Read`, `Bash` only
 - **Bash commands:** gated by `validate-cmd.sh` (PreToolUse hook) — only `repo.sh` wrapper, `wc`, and safe pipe
   targets (grep, head, tail, sort, uniq, cut, tr) are allowed
-- **repo.sh:** provides `diff`, `log`, `show`, `grep`, `ls-files`, `cat`, `ls`, `pr-meta`, `pr-search` with path
+- **repo.sh:** provides `diff`, `log`, `show`, `grep`, `ls-files`, `cat`, and `ls` with path
   containment enforcement
-- **No raw git/gh:** all git operations go through repo.sh; cross-repo PR lookups go through `pr-meta`/`pr-search`
-  subcommands
+- **No raw git/gh:** all git operations go through repo.sh; cross-repo PR lookups are
+  network-gated and disabled by default
 - **No writes:** agents cannot edit files, create files, or redirect output
+
+Codex uses the portable reviewer prompts in `skills/model-serving-review/references/reviewer-roles.md`. Those prompts
+preserve the same untrusted-content boundary and restrict repository investigation to the read-only `repo.sh` contract.
 
 ## Prompt injection defense
 
@@ -114,8 +120,8 @@ All agents include a security preamble:
 
 The finding-verifier additionally treats findings themselves as potentially carrying injected content from diff context.
 
-The safety-reviewer's `pr-meta` subcommand returns structured fields only (title, labels, state, files) — no PR body, to
-avoid ingesting untrusted PR descriptions.
+Cross-repo PR metadata is disabled by default. When explicitly enabled, it returns structured fields only — no PR body,
+to avoid ingesting untrusted PR descriptions.
 
 ## Output format
 

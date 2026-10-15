@@ -8,13 +8,16 @@ FIXTURES ?=
 # Parallel skill runs during `evals-run` / `evals`.
 JOBS ?= 3
 
+# Review runtime used by `evals-run` / `evals`: codex (default) or claude.
+RUNTIME ?= codex
+
 # Results directory. Defaults to the newest one under evals/results so that
 # `evals-run` / `evals-grade` target the same run `evals-setup` just created.
 RESULTS_DIR ?= $(shell ls -1dt $(EVALS_DIR)/results/*/ 2>/dev/null | head -1)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help evals evals-setup evals-run evals-grade evals-clean
+.PHONY: help evals evals-setup evals-run evals-grade evals-clean validate-skill
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -24,7 +27,7 @@ evals: ## Full pipeline: set up fixtures, run the skill headlessly, grade (JOBS=
 	@set -e; \
 	rd="$(EVALS_DIR)/results/$$(date +%Y%m%d-%H%M%S)"; \
 	RESULTS_DIR="$$rd" bash $(EVALS_DIR)/run-evals.sh $(FIXTURES); \
-	JOBS=$(JOBS) bash $(EVALS_DIR)/run-skill.sh "$$rd"; \
+	JOBS=$(JOBS) RUNTIME=$(RUNTIME) bash $(EVALS_DIR)/run-skill.sh "$$rd"; \
 	bash $(EVALS_DIR)/grade-results.sh "$$rd"
 
 evals-setup: ## Create fixture repos and review dirs (FIXTURES="..." to scope)
@@ -32,7 +35,11 @@ evals-setup: ## Create fixture repos and review dirs (FIXTURES="..." to scope)
 
 evals-run: ## Run the skill headlessly over the latest (or RESULTS_DIR=...) fixtures
 	@test -n "$(RESULTS_DIR)" || { echo "no results dir found; run 'make evals-setup' first" >&2; exit 1; }
-	JOBS=$(JOBS) bash $(EVALS_DIR)/run-skill.sh $(RESULTS_DIR)
+	JOBS=$(JOBS) RUNTIME=$(RUNTIME) bash $(EVALS_DIR)/run-skill.sh $(RESULTS_DIR)
+
+validate-skill: ## Validate the skill with the Codex skill-creator validator
+	@python3 "$${CODEX_HOME:-$$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" \
+		skills/model-serving-review
 
 evals-grade: ## Grade skill outputs in the latest (or RESULTS_DIR=...) results dir
 	@test -n "$(RESULTS_DIR)" || { echo "no results dir found; run 'make evals-setup' first" >&2; exit 1; }

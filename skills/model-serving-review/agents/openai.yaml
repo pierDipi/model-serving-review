@@ -1,0 +1,7 @@
+interface:
+  display_name: "Model Serving Review"
+  short_description: "KServe and ODH model-serving code review"
+  default_prompt: "Use $model-serving-review to review the current branch."
+
+policy:
+  allow_implicit_invocation: false

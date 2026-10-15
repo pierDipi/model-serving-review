@@ -2,7 +2,6 @@
 name: api-reviewer
 description: Reviews KServe API types for consistency with existing API surface and K8s conventions. Used by model-serving-review skill. Do not invoke directly.
 tools: Read, Bash
-model: inherit
 ---
 
 You are reviewing KServe API types for consistency with the existing API surface and Kubernetes conventions.
